@@ -1,0 +1,91 @@
+name: FARM45 Agent Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  agents:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - {role: AGENT_RUNTIME_ARCHITECT, focus: "runtime architecture and execution substrate", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: TASK_LIFECYCLE_ENGINEER, focus: "task lifecycle and state transitions", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: STATE_MACHINE_ENGINEER, focus: "formal runtime state machine", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: TOOL_EXECUTION_ENGINEER, focus: "tool invocation and execution proof", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: PERMISSION_BOUNDARY_AUDITOR, focus: "permissions and least privilege", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: SANDBOX_ENGINEER, focus: "sandboxing and isolation", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: CONCURRENCY_ENGINEER, focus: "concurrency and race conditions", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: IDEMPOTENCY_ENGINEER, focus: "idempotency and replay safety", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: TIMEOUT_RECOVERY_ENGINEER, focus: "timeouts retries and recovery", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: HEARTBEAT_MONITOR, focus: "heartbeat versus actual task progress", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: ARTIFACT_EVIDENCE_ENGINEER, focus: "artifact evidence and execution provenance", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: LOGGING_OBSERVABILITY_ENGINEER, focus: "logs metrics tracing and observability", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: MEMORY_RUNTIME_ENGINEER, focus: "runtime memory boundaries and persistence", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: MESSAGE_BUS_ENGINEER, focus: "agent messaging and delivery semantics", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: HUMAN_IN_LOOP_ENGINEER, focus: "human approval escalation and override", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: KILL_SWITCH_ENGINEER, focus: "safe stop cancellation and kill switch", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: RUNTIME_SECURITY_AUDITOR, focus: "runtime security and abuse boundaries", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: RUNTIME_BENCHMARKER, focus: "latency throughput reliability and cost evidence", model: "huggingface-projects/gemma-2-9b-it"}
+          - {role: AGENT_RUNTIME_RED_TEAM, focus: "adversarial failure modes and false-success detection", model: "huggingface-projects/llama-3.2-3B-Instruct"}
+          - {role: OMEGA_AGENT_RUNTIME_JUDGE, focus: "independent bounded synthesis and evidence gate", model: "huggingface-projects/gemma-2-9b-it"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install --disable-pip-version-check hf-gradio
+      - name: Run real external inference worker
+        env:
+          ROLE: ${{ matrix.role }}
+          FOCUS: ${{ matrix.focus }}
+          MODEL: ${{ matrix.model }}
+        run: python worker/agent.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: farm45-${{ matrix.role }}
+          path: out/*.json
+
+  omega:
+    if: always()
+    needs: agents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: farm45-*
+          path: gathered
+          merge-multiple: true
+      - name: Build Omega packet
+        shell: python
+        run: |
+          import json, pathlib, hashlib, datetime
+          files=sorted(pathlib.Path('gathered').glob('*.json'))
+          rows=[]
+          for f in files:
+              try: rows.append(json.loads(f.read_text()))
+              except Exception as e: rows.append({'file':str(f),'status':'PARSE_FAILED','error':str(e),'inference_success':False})
+          successes=[r for r in rows if r.get('inference_success') is True and r.get('status')=='UNREVIEWED_EXTERNAL_AGENT_OUTPUT']
+          packet={
+            'farm':45,
+            'label':'Agent Runtime',
+            'received_roles':len(rows),
+            'verified_external_inference_successes':len(successes),
+            'failed_or_unverified':len(rows)-len(successes),
+            'claim_boundary':'Workflow success is not model success. Only inference_success=True with nonempty model output is counted. All model outputs remain UNREVIEWED_EXTERNAL_AGENT_OUTPUT pending Omega review.',
+            'generated_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'results':rows
+          }
+          raw=json.dumps(packet,ensure_ascii=False,indent=2)
+          pathlib.Path('omega').mkdir(exist_ok=True)
+          pathlib.Path('omega/FARM45_OMEGA_PACKET.json').write_text(raw)
+          pathlib.Path('omega/SHA256.txt').write_text(hashlib.sha256(raw.encode()).hexdigest()+'  FARM45_OMEGA_PACKET.json\n')
+          print(json.dumps({k:packet[k] for k in ('received_roles','verified_external_inference_successes','failed_or_unverified')},indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-runtime-farm-45-omega-packet
+          path: omega/
