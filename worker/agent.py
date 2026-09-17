@@ -1,4 +1,5 @@
 import hashlib, json, os, pathlib, subprocess, datetime
+from registry_loader import load_registry
 
 PREFERRED=['/generate','/chat','/predict','/respond','/infer','/run']
 ROLE=os.environ.get('ROLE','AGENT_RUNTIME_ARCHITECT')
@@ -73,9 +74,13 @@ def invoke(space,prompt):
         errors.append({'endpoint':ep,'error':(pred.stderr or pred.stdout)[-2000:]})
     return False,'',{'errors':errors}
 
+registry_context, registry_runtime = load_registry(['constitution','meta_core','disciplines','keys','banks','connection_contract'])
 prompt=f'''You are role {ROLE} in CÉRÉBRON Ω FARM45 Agent Runtime.
 Focus: {FOCUS}.
-Audit or design a real agent execution runtime. Distinguish worker process from AI agent, heartbeat from success, logs from correctness, and workflow success from verified model inference. Cover lifecycle/state, tool calls, permissions, sandboxing, idempotency, concurrency, timeout/recovery, evidence artifacts, provenance, human-in-the-loop and kill switch. Do not fabricate executions or evidence. Mark unknowns explicitly. Return concise structured findings with CLAIM<=EVIDENCE.'''
+Audit or design a real agent execution runtime. Distinguish worker process from AI agent, heartbeat from success, logs from correctness, and workflow success from verified model inference. Cover lifecycle/state, tool calls, permissions, sandboxing, idempotency, concurrency, timeout/recovery, evidence artifacts, provenance, human-in-the-loop and kill switch. Do not fabricate executions or evidence. Mark unknowns explicitly. Return concise structured findings with CLAIM<=EVIDENCE.
+
+The following CÉRÉBRON registry context is shared guidance, not evidence and not self-certifying:
+{registry_context}'''
 
 ok,text,meta=invoke(MODEL,prompt)
 result={
@@ -85,6 +90,7 @@ result={
   'api_name':meta.get('endpoint') if isinstance(meta,dict) else None,
   'output':text if ok else '',
   'error':None if ok else meta,
+  'registry_runtime':registry_runtime,
   'timestamp_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
   'output_sha256':hashlib.sha256(text.encode()).hexdigest() if ok and text else None
 }
